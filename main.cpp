@@ -654,8 +654,8 @@ cv::Mat watershedSegmentation(const cv::Mat& fi)
 	return fo;
 }
 
-std::string window_name = "Filtering";
-cv::Mat src_gray, dst, segmented;
+std::string window_name = "Filtering and Segmentation";
+cv::Mat src_gray, dst, segmented_image;
 int threshold_value = 0;
 int threshold_type = 3;
 int gaussian_value = 5;
@@ -667,7 +667,7 @@ std::string trackbar_type = "Type: \n 0: Binary \n 1: Binary Inverted \n 2: Trun
 std::string trackbar_value = "Value";
 std::string trackbar_gauss = "Gaussian kernel";
 
-void Filtering(int, void*)
+void FilteringAndSeg(int, void*)
 {
   /* 0: Binary
 	 1: Binary Inverted
@@ -679,8 +679,8 @@ void Filtering(int, void*)
 	cv::GaussianBlur(src_gray, temp, cv::Size(21,21),0,0);
 	cv::threshold( temp, dst, threshold_value, max_BINARY_value, threshold_type );
  
-	segmented = watershedSegmentation(dst);
-	if(!segmented.data)
+	segmented_image = watershedSegmentation(dst);
+	if(!segmented_image.data)
 	{
 		std::cerr << "The segmented image is empty!\n";
 		exit(1);
@@ -688,9 +688,7 @@ void Filtering(int, void*)
 		std::cout << "Segmented image was computed!\n";
 	}
 
-  /* Press ESC to exit
-   */
-  cv::imshow( window_name, segmented );
+	cv::imshow( window_name, segmented_image );
 }
 
 int main(int argc, char **argv)
@@ -783,60 +781,53 @@ int main(int argc, char **argv)
 			exit(1);
 		}
 		inputImageFile.close();
-		std::cout << "Here!\n";
-		bool status = true; 
-		image = cv::imread(inputFilePath + inputDicomName, 4);
-		if(status == false || !image.data)
-		{
-			std::cout << imageDicom.size() << "\n";
-			std::cout << image.rows << " " << image.cols << "\n";
-			std::cerr << "Reading Dicom was a bust!\n";
-			//exit(1);
-		}
-		std::cout << image.rows << " " << image.cols << "\n";
 
 		gdcm::ImageReader reader;
-		reader.SetFileName("brain_001.dcm");
+		inputFilePath = inputFilePath + "test_data_hw3_1";
+		reader.SetFileName((inputFilePath + inputDicomName).c_str());
 		if( !reader.Read() )
 		{
 			std::cerr << "Could not read: " << inputFilePath + inputDicomName << std::endl;
-			//return 1;
+			return 1;
 		}
 		//std::cout << reader.GetImage() << "\n";
 
 		// The other output of gdcm::ImageReader is a gdcm::Image
-  		const gdcm::Image &image2 = reader.GetImage();
-  		image2.Print(std::cout);
-  		// Let's get some property from the image:
-  		//unsigned int ndim = image.GetNumberOfDimensions();
-  		//std::cout << "ndim: " << ndim << "\n";
+		const gdcm::Image &image2 = reader.GetImage();
+		image2.Print(std::cout);
+		// Let's get some property from the image:
+		//unsigned int ndim = image.GetNumberOfDimensions();
+		//std::cout << "ndim: " << ndim << "\n";
 	}
 	/**************************/
 
-	/* gaussian blur */
+	/* visualize 2D segmentation with pre-filtering */
 	//cv::Mat filtered_image;
 	//cv::GaussianBlur(image, filtered_image, cv::Size(21,21),0,0);
 	//cv::Mat new_image;
 	//cv::threshold(filtered_image, new_image, 0, 255, cv::THRESH_OTSU);
 	src_gray = image;
 
-	/// Create a window to display results
-/*  	cv::namedWindow( window_name, CV_WINDOW_AUTOSIZE );
+	/* Create a window to display results */
+	cv::namedWindow( window_name, CV_WINDOW_AUTOSIZE );
  
-	/// Create Trackbar to choose type of Threshold
+	/* Create Trackbar to choose type of Threshold */
 	cv::createTrackbar( trackbar_type,
 				  window_name, &threshold_type,
-				  max_type, Filtering );
- 
+				  max_type, FilteringAndSeg );
+	
+	/* Create Trackbar to choose value of Threshold */
 	cv::createTrackbar( trackbar_value,
 				  window_name, &threshold_value,
-				  max_value, Filtering );
+				  max_value, FilteringAndSeg );
 
+	/* Create Trackbar to choose gaussian kernal size */
 	cv::createTrackbar( trackbar_gauss, window_name,
-					&gaussian_value, max_gaussian, Filtering);
+					&gaussian_value, max_gaussian, FilteringAndSeg);
 
-	Filtering(0,0);
+	FilteringAndSeg(0,0);
 
+	/* PRESS ESC TO EXIT */
 	while(true)
 	{
 		int c;
@@ -845,23 +836,8 @@ int main(int argc, char **argv)
 		{ break; }
 	}
 
-	writeImage(outputFilePath + "segmented_" + currentDateTime() + ".jpg", segmented);
-*/	/*****************/
-
-	/* segmentation call */
-	//cv::Mat segmented_image = image;
-/*	cv::Mat segmented_image = watershedSegmentation(image);
-	if(!segmented_image.data)
-	{
-		std::cerr << "The segmented image is empty!\n";
-		exit(1);
-	} else {
-		std::cout << "Segmented image was computed!\n";
-	}*/
-	/*********************/
-
 	/* if user wants to output the image */
-/*	if(!outputImageName.empty())
+	if(!outputImageName.empty())
 	{
 		std::ofstream outputImageFile((outputFilePath + outputImageName).c_str());
 		if(!outputImageFile.good())
@@ -875,18 +851,18 @@ int main(int argc, char **argv)
 	} else {
 		outputImageName = "out_"+currentDateTime()+".jpg";
 		writeImage(outputFilePath + outputImageName, segmented_image);
-	}*/
+	}
 	/**************************/
 
 	/* visualize image */
-	if(showImage)
+		if(showImage)
 	{
 		// Create a window for display.
-		cv::namedWindow( "Display window", CV_WINDOW_AUTOSIZE );
+		/*cv::namedWindow( "Display window", CV_WINDOW_AUTOSIZE );
 		// Show our image inside it.
 		cv::imshow( "Display window", image );
 		// Wait for a keystroke in the window
-		cv::waitKey(0);                                          
+		cv::waitKey(0);*/                                          
 	}
 	/*******************/
 
