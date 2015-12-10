@@ -76,6 +76,32 @@ message(STATUS "    version: ${OpenCV_VERSION}")
 message(STATUS "    libraries: ${OpenCV_LIBS}")
 message(STATUS "    include path: ${OpenCV_INCLUDE_DIRS}")
 
+
+FIND_PACKAGE(GDCM REQUIRED)
+   IF(GDCM_FOUND)
+       INCLUDE(${GDCM_USE_FILE})
+       SET(GDCM_LIBRARIES 
+           gdcmcharls
+           gdcmCommon
+           gdcmDICT
+           gdcmDSED
+           gdcmexpat
+           #gdcmgetopt
+           gdcmIOD
+           gdcmjpeg12
+           gdcmjpeg16
+           gdcmjpeg8
+           gdcmMEXD
+           gdcmMSFF
+           gdcmopenjpeg
+           gdcmzlib)
+   ELSE(GDCM_FOUND)
+       MESSAGE(FATAL_ERROR "Cannot find GDCM, did you set GDCM_DIR?")
+   ENDIF(GDCM_FOUND)
+
+
+#add_definitions(-lgdcmDSED -lgdcmDICT -lgdcmIOD -lgdcmMSFF -lgdcmMEXD)
+
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-target_link_libraries(Watershed ${OpenCV_LIBS})
+target_link_libraries(Watershed ${OpenCV_LIBS} ${GDCM_LIBRARIES})

@@ -14,7 +14,18 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+
+#include "gdcmImageReader.h"
+#include "gdcmReader.h"
+#include "gdcmImage.h"
+#include "gdcmPixmapReader.h"
+#include "gdcmFile.h"
+//#include "gdcmWriter.h"
+//#include "gdcmAttribute.h"
+//#include "gdcmImageWriter.h"
+//#include "gdcmImageChangeTransferSyntax.h"
 /* internal */
+//#include "include/dicom.h"
 #include "include/lodepng.h"
 
 #define mask -2 // initial value of a threshold value
@@ -25,9 +36,28 @@
 typedef unsigned int uint;
 typedef unsigned char uchar;
 typedef std::vector<std::vector<unsigned int> > ImageContainer;
+
 typedef std::map<std::pair<unsigned int, unsigned int>, 
 	std::vector<std::pair<unsigned int, unsigned int> > > Neighbors;
 typedef std::array<std::vector<std::pair<uint, uint> >, 256 > HeightTable; 
+
+struct Point3D {
+	unsigned int x;
+	unsigned int y;
+	unsigned int z;
+
+	bool operator == (const Point3D& p) const {
+		return (x == p.x && y == p.y && z == p.z);
+	}
+
+	bool operator < (const Point3D& p) const {
+		return (x < p.x || (x == p.x && y < p.y) || (x == p.x && y == p.y && z < p.z)); 
+	}
+};
+typedef std::map<Point3D, std::vector<Point3D> > Neighbors3D;
+typedef std::array< std::vector<Point3D>, 256 > HeightTable3D;
+
+typedef std::vector< std::vector < std::vector<uchar > > > Mat3D;
 
 void showHelp(char *s)
 {
@@ -142,6 +172,59 @@ void writeImage(const std::string& filepath, const cv::Mat& image)
 	std::cout << "End write\n";
 }
 
+Neighbors3D computeNeighbors3D(const Mat3D& image, const uint x, const uint y,
+ const uint z)
+{
+	Neighbors3D neighbors;
+	for(unsigned int i = 0; i < x; i++)
+		for(unsigned int j = 0; j < y; j++)
+			for(unsigned int k = 0; k < z; k++)
+			{
+				Point3D p;
+				p.x = i; p.y = j; p.z = k;
+				std::vector<Point3D> n;
+				if( i-1 >= 0 )
+				{
+					Point3D pn;
+					pn.x = i-1; pn.y = j; pn.z = k;
+					n.push_back(pn);
+				}
+				if( j+1 < y )
+				{
+					Point3D pn;
+					pn.x = i; pn.y = j+1; pn.z = k;
+					n.push_back(pn);
+				}
+				if( i+1 < x )
+				{
+					Point3D pn;
+					pn.x = i+1; pn.y = j; pn.z = k;
+					n.push_back(pn);
+				}
+				if( j-1 >= 0 )
+				{
+					Point3D pn;
+					pn.x = i; pn.y = j-1; pn.z = k;
+					n.push_back(pn);					
+				}
+				if( k-1 >= 0 )
+				{
+					Point3D pn;
+					pn.x = i; pn.y = j; pn.z = k-1;
+					n.push_back(pn);
+				}
+				if(k+1 < z)
+				{
+					Point3D pn;
+					pn.x = i; pn.y = j; pn.z = k+1;
+					n.push_back(pn);					
+				}
+				neighbors.insert(std::make_pair(p,n));
+			}
+
+	return neighbors;
+}
+
 Neighbors computeNeighbors(const cv::Mat& image)
 {
 	// 4 neighbor approach: up, right, bottom, left
@@ -191,6 +274,27 @@ Neighbors computeNeighbors(const cv::Mat& image)
 	return neighbors;
 }
 
+HeightTable3D computeHeightTable3D(const Mat3D& image, const uint x, const uint y,
+	const uint z)
+{
+	HeightTable3D ht;
+	for(unsigned int i = 0; i < x; i++)
+		for(unsigned int j = 0; j < y; j++)
+			for(unsigned int k = 0; k < z; k++)
+			{
+				if(image[i][j][k] < 0 || image[i][j][k] > 255)
+				{
+					std::cerr << "invalid: image.at<uchar>(" << i << ", " << j;
+					std::cerr << ", " << k << ") in HeightTable!\n";
+					exit(1);
+				}
+				Point3D p;
+				p.x = i; p.y = j; p.z = k;
+				ht[image[i][j][k]].push_back(p);
+			}
+	return ht;
+}
+
 HeightTable computeHeightTable(const cv::Mat& image)
 {
 	HeightTable ht;
@@ -204,17 +308,170 @@ HeightTable computeHeightTable(const cv::Mat& image)
 			}
 			ht[image.at<uchar>(i,j)].push_back(std::make_pair(i,j));
 		}
-	long sum = 0;
-	for(uint i = 0; i < ht.size(); i++)
+	//long sum = 0;
+	/*for(uint i = 0; i < ht.size(); i++)
 	{
 		std::cout << i <<": " << ht[i].size() << "\n";
 		sum += ht[i].size();
 	}
 	std::cout << "sum: " << sum << "| rowsXcols: " << image.rows * image.cols;
-	std::cout << "\n\n";
+	std::cout << "\n\n";*/
 	return ht;
 }
 
+Mat3D watershedSegmentation3D(const Mat3D& fi, const uint x, const uint y, const uint z)
+{
+	Mat3D fo;
+	fo.resize(x);
+	for(unsigned int i = 0; i < x; i++)
+	{
+		fo[i].resize(y);
+		for(unsigned int j = 0; j < y; j++)
+		{
+			fo[i][j].resize(z);
+			for(unsigned int k = 0; k < z; k++)
+			{
+				fo[i][j][k] = init;
+			}
+		}
+	}
+
+	int current_label = 0;
+	bool flag = true;
+	Neighbors3D neighbors = computeNeighbors3D(fi,x,y,z);
+	std::cout << "finished with Neighbor computing!\n";
+	/*********************************************/
+	uchar h_min = fi[0][0][0];
+	uchar h_max = fi[0][0][0];
+	for(unsigned int i = 0; i < x; i++)
+		for(unsigned int j = 0; j < y; j++)
+			for(unsigned int k = 0; k < z; k++)
+			{
+				if(fi[i][j][k] < h_min) h_min = fi[i][j][k];
+				if(fi[i][j][k] > h_max) h_max = fi[i][j][k];
+			}
+
+	/* get height table for ease of access */
+	HeightTable3D heights = computeHeightTable3D(fi,x,y,z);
+	std::cout << "Finished with height table computation!\n";
+	/***************************************/
+	std::queue<Point3D> fifo;
+
+	for(uchar h = h_min; h < h_max; h++)
+	{
+		/* 1st part */
+		// mark with mask value all pixels at current height
+		// and add to queue fifo if one of its neighbor
+		// pixels was set before
+		for(unsigned int i = 0; i < heights[h].size(); i++)
+		{
+			Point3D p = heights[h][i];
+			fo[p.x][p.y][p.z] = mask;
+			for(uint j = 0; j < neighbors[p].size(); j++)
+			{
+				Point3D p1 = neighbors[p][j];
+				if(fo[p.x][p.y][p.z] > 0 || 
+					fo[p.x][p.y][p.z] == wshed)
+				{
+					fo[p.x][p.y][p.z] = inqueue;
+					fifo.push(p1);
+				}
+			}
+		}
+		//std::cout << "First part for h: " << h << "\n";
+		
+		/* 2nd part */
+		while(!fifo.empty())
+		{
+			Point3D p = fifo.front();
+			fifo.pop();
+			// for all the neighbors of pixel p
+			for(uint i = 0; i < neighbors[p].size(); i++)
+			{
+				Point3D p1 = neighbors[p][i];
+				if(fo[p.x][p.y][p.z] > 0)
+				{
+					// i.e. p1 belongs to an already labelled basin
+					// case 1: p is not set or p is watershed and flag is true
+					//         p is set to lable of p1
+					if(fo[p.x][p.y][p.z] == inqueue ||
+						(fo[p.x][p.y][p.z] == wshed &&
+							flag == true))
+					{
+						fo[p.y][p.x][p.z] = 
+							fo[p1.x][p1.y][p1.z];
+					}
+					// case 2: p has already a label but its different than p1
+					// 		   in such case set p to wshed and flag to false
+					else if(fo[p.x][p.y][p.z] > 0 &&
+						(fo[p.x][p.y][p.z] != 
+							fo[p1.x][p1.y][p1.z]))
+					{
+						fo[p.x][p.y][p.z] = wshed;
+						flag = false;
+					}
+				} else if(fo[p1.x][p1.y][p1.z] == wshed)
+				{
+					// if neighbor is set to wshed value 
+					// check if current is not set, if yes set it to
+					// wshed as well
+					if(fo[p.x][p.y][p.z] == inqueue)
+					{
+						fo[p.x][p.y][p.z] = wshed;
+						flag = true;
+					}
+				} else if(fo[p1.x][p1.y][p1.z] == mask)
+				{
+					// if neighbor equals mask add neighbor to queue
+					fo[p.x][p.y][p.z] = inqueue;
+					fifo.push(p1);
+				}
+			}
+		}
+		//std::cout << "Second part for h: " << h << "\n";	
+		
+		/* 3rd part */
+		for(unsigned int i = 0; i < heights[h].size(); i++)
+		{
+			// check for new minima
+			Point3D p = heights[h][i];
+			if(fo[p.x][p.y][p.z] == mask)
+			{
+				current_label++;
+				fifo.push(p);
+				fo[p.x][p.y][p.z] = current_label;
+				// propagate the current_label trough the 
+				// connected structure given by neighbors a.k.a BFS
+				while(!fifo.empty())
+				{
+					Point3D p1 = fifo.front();
+					fifo.pop();
+					if(neighbors.find(p1) != neighbors.end())
+					{
+						for(uint j = 0; j < neighbors[p1].size(); j++)
+						{
+							Point3D p2 = neighbors[p1][j];
+							if(fo[p2.x][p2.y][p2.z] == mask)
+							{
+								fifo.push(p2);
+								fo[p2.x][p2.y][p2.z] = current_label;
+							}
+						}
+					} else {
+						std::cerr << "pair (" << p1.x << ", " << p1.y << ", ";
+						std::cerr << p1.z << ")" << " not found in neighbors map!\n";
+						exit(1); 
+					}
+				}
+			}
+		}
+
+	}
+
+	return fo;
+}
+
+// 2D watershed segmentation
 cv::Mat watershedSegmentation(const cv::Mat& fi)
 {
 	/* initialization step */
@@ -397,6 +654,45 @@ cv::Mat watershedSegmentation(const cv::Mat& fi)
 	return fo;
 }
 
+std::string window_name = "Filtering";
+cv::Mat src_gray, dst, segmented;
+int threshold_value = 0;
+int threshold_type = 3;
+int gaussian_value = 5;
+int const max_value = 255;
+int const max_type = 4;
+int const max_BINARY_value = 255;
+int const max_gaussian = 55;
+std::string trackbar_type = "Type: \n 0: Binary \n 1: Binary Inverted \n 2: Truncate \n 3: To Zero \n 4: To Zero Inverted";
+std::string trackbar_value = "Value";
+std::string trackbar_gauss = "Gaussian kernel";
+
+void Filtering(int, void*)
+{
+  /* 0: Binary
+	 1: Binary Inverted
+	 2: Threshold Truncated
+	 3: Threshold to Zero
+	 4: Threshold to Zero Inverted
+   */
+	cv::Mat temp;
+	cv::GaussianBlur(src_gray, temp, cv::Size(21,21),0,0);
+	cv::threshold( temp, dst, threshold_value, max_BINARY_value, threshold_type );
+ 
+	segmented = watershedSegmentation(dst);
+	if(!segmented.data)
+	{
+		std::cerr << "The segmented image is empty!\n";
+		exit(1);
+	} else {
+		std::cout << "Segmented image was computed!\n";
+	}
+
+  /* Press ESC to exit
+   */
+  cv::imshow( window_name, segmented );
+}
+
 int main(int argc, char **argv)
 {
 	if(argc <= 1)
@@ -408,12 +704,13 @@ int main(int argc, char **argv)
 	char tmp;
 	std::string inputFilePath("../input/");
 	std::string inputImageName;
+	std::string inputDicomName;
 	std::string outputFilePath("../output/");
 	std::string outputImageName;
 	bool showImage = false;
 	/* using getopt to parse command line arguments */
 	/* h option without argument, i,o options with argument*/
-	while((tmp = getopt(argc, argv, "hi:o:s")) != -1)
+	while((tmp = getopt(argc, argv, "hi:o:sd:")) != -1)
 	{
 		switch(tmp)
 		{
@@ -426,11 +723,14 @@ int main(int argc, char **argv)
 			case 'o':
 				outputImageName = optarg;
 				break;
+			case 'd':
+				inputDicomName = optarg;
+				break;
 			case 's':
 				showImage = true;
 				break;
 			case '?':
-				if(optopt == 'i' || optopt == 'o')
+				if(optopt == 'i' || optopt == 'o' || optopt == 'd')
 				{
 					std::cerr << "Option -" << optopt << " requires and argument.\n";
 				} else if(isprint(optopt))
@@ -449,7 +749,7 @@ int main(int argc, char **argv)
 	}
 
 	/* check if filepath(s) can be opened */
-	if(inputImageName.empty())
+	if(inputImageName.empty() && inputDicomName.empty())
 	{
 		showHelp(argv[0]);
 		exit(1);
@@ -457,6 +757,7 @@ int main(int argc, char **argv)
 
 	/* input image */
 	cv::Mat image;
+	std::vector<cv::Mat> imageDicom;
 
 	if(!inputImageName.empty())
 	{
@@ -471,22 +772,96 @@ int main(int argc, char **argv)
 		image = readImage(inputFilePath + inputImageName);
 		std::cout << "rows: " << image.rows << "\n";
 		std::cout << "cols: " << image.cols << "\n";
+	} else if(!inputDicomName.empty())
+	{
+		std::cout << "inputDicomName: " << inputDicomName << "\n";
+		std::ifstream inputImageFile((inputFilePath + inputDicomName).c_str());
+		if(!inputImageFile.good())
+		{
+			std::cerr << "There was a problem opening: ";
+			std::cerr << inputFilePath + inputImageName << "\n";
+			exit(1);
+		}
+		inputImageFile.close();
+		std::cout << "Here!\n";
+		bool status = true; 
+		image = cv::imread(inputFilePath + inputDicomName, 4);
+		if(status == false || !image.data)
+		{
+			std::cout << imageDicom.size() << "\n";
+			std::cout << image.rows << " " << image.cols << "\n";
+			std::cerr << "Reading Dicom was a bust!\n";
+			//exit(1);
+		}
+		std::cout << image.rows << " " << image.cols << "\n";
+
+		gdcm::ImageReader reader;
+		reader.SetFileName("brain_001.dcm");
+		if( !reader.Read() )
+		{
+			std::cerr << "Could not read: " << inputFilePath + inputDicomName << std::endl;
+			//return 1;
+		}
+		//std::cout << reader.GetImage() << "\n";
+
+		// The other output of gdcm::ImageReader is a gdcm::Image
+  		const gdcm::Image &image2 = reader.GetImage();
+  		image2.Print(std::cout);
+  		// Let's get some property from the image:
+  		//unsigned int ndim = image.GetNumberOfDimensions();
+  		//std::cout << "ndim: " << ndim << "\n";
 	}
 	/**************************/
 
+	/* gaussian blur */
+	//cv::Mat filtered_image;
+	//cv::GaussianBlur(image, filtered_image, cv::Size(21,21),0,0);
+	//cv::Mat new_image;
+	//cv::threshold(filtered_image, new_image, 0, 255, cv::THRESH_OTSU);
+	src_gray = image;
+
+	/// Create a window to display results
+/*  	cv::namedWindow( window_name, CV_WINDOW_AUTOSIZE );
+ 
+	/// Create Trackbar to choose type of Threshold
+	cv::createTrackbar( trackbar_type,
+				  window_name, &threshold_type,
+				  max_type, Filtering );
+ 
+	cv::createTrackbar( trackbar_value,
+				  window_name, &threshold_value,
+				  max_value, Filtering );
+
+	cv::createTrackbar( trackbar_gauss, window_name,
+					&gaussian_value, max_gaussian, Filtering);
+
+	Filtering(0,0);
+
+	while(true)
+	{
+		int c;
+		c = cv::waitKey( 20 );
+		if( (char)c == 27 )
+		{ break; }
+	}
+
+	writeImage(outputFilePath + "segmented_" + currentDateTime() + ".jpg", segmented);
+*/	/*****************/
+
 	/* segmentation call */
-	cv::Mat segmented_image = watershedSegmentation(image);
+	//cv::Mat segmented_image = image;
+/*	cv::Mat segmented_image = watershedSegmentation(image);
 	if(!segmented_image.data)
 	{
 		std::cerr << "The segmented image is empty!\n";
 		exit(1);
 	} else {
 		std::cout << "Segmented image was computed!\n";
-	}
+	}*/
 	/*********************/
 
 	/* if user wants to output the image */
-	if(!outputImageName.empty())
+/*	if(!outputImageName.empty())
 	{
 		std::ofstream outputImageFile((outputFilePath + outputImageName).c_str());
 		if(!outputImageFile.good())
@@ -500,7 +875,7 @@ int main(int argc, char **argv)
 	} else {
 		outputImageName = "out_"+currentDateTime()+".jpg";
 		writeImage(outputFilePath + outputImageName, segmented_image);
-	}
+	}*/
 	/**************************/
 
 	/* visualize image */
@@ -509,7 +884,7 @@ int main(int argc, char **argv)
 		// Create a window for display.
 		cv::namedWindow( "Display window", CV_WINDOW_AUTOSIZE );
 		// Show our image inside it.
-		cv::imshow( "Display window", segmented_image );
+		cv::imshow( "Display window", image );
 		// Wait for a keystroke in the window
 		cv::waitKey(0);                                          
 	}
