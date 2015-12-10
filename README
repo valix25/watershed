@@ -1,21 +1,9 @@
 Building & Running the program:
-1. cd to build folder
-2. $ cmake ..
-3. $ make
-4. Next to see command line options:
-   $ ./Moments -h
-5. 2 Major options:
-   $ ./Moments -i a1.png
-   creates the a1_FeatureVectors in output folder
-   $ ./Moments -l imagesList -m 3
-   this would create the hu moments table and the image from the distance matrix.
-   other arguments for -m are 0 for image moments, 1 for central moments and 2 for scaled moments. At any time you can run -h to see the options again.
-
-Note for the distance matrix image:
-1. max and min were computed from the distance matrix
-2. scaled each value from distance matrix to [0,1]
-   (dist_mat_entry - min) / (max - min)
-3. scaled it to [0,255]
-   (dist_mat_entry - min)*255.0 / (max - min)
-4. take the floor of the value and is going to be the gray value in the image
-5. As a result darker shades should show little error, or close values in the distance matrices of the compared images, in contrast lighter shades would high differences in the distance matrices.
+1. $ mkdir build
+2. $ cd build
+3. $ cmake ..
+4. $ make
+5. Next to see command line options:
+   $ ./Watershed -h
+6. Main option:
+   $ ./Watershed -i coins.jpg

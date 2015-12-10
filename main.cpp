@@ -15,23 +15,18 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
-#include "gdcmImageReader.h"
-#include "gdcmReader.h"
-#include "gdcmImage.h"
-#include "gdcmPixmapReader.h"
-#include "gdcmFile.h"
-//#include "gdcmWriter.h"
-//#include "gdcmAttribute.h"
-//#include "gdcmImageWriter.h"
-//#include "gdcmImageChangeTransferSyntax.h"
-/* internal */
-//#include "include/dicom.h"
+//#include "gdcmImageReader.h"
+//#include "gdcmReader.h"
+//#include "gdcmImage.h"
+//#include "gdcmPixmapReader.h"
+//#include "gdcmFile.h"
+
 #include "include/lodepng.h"
 
-#define mask -2 // initial value of a threshold value
-#define wshed 0 // value of pixels belonging to watershed
-#define init -1 // initial value of fo
-#define inqueue -3 // value assigned to pixels put into queue
+const int mask = -2; // initial value of a threshold value
+const int wshed = 0; // value of pixels belonging to watershed
+const int init = -1; // initial value of fo
+const int inqueue = -3; // value assigned to pixels put into queue
 
 typedef unsigned int uint;
 typedef unsigned char uchar;
@@ -662,7 +657,7 @@ int gaussian_value = 5;
 int const max_value = 255;
 int const max_type = 4;
 int const max_BINARY_value = 255;
-int const max_gaussian = 55;
+int const max_gaussian = 125;
 std::string trackbar_type = "Type: \n 0: Binary \n 1: Binary Inverted \n 2: Truncate \n 3: To Zero \n 4: To Zero Inverted";
 std::string trackbar_value = "Value";
 std::string trackbar_gauss = "Gaussian kernel";
@@ -676,7 +671,8 @@ void FilteringAndSeg(int, void*)
 	 4: Threshold to Zero Inverted
    */
 	cv::Mat temp;
-	cv::GaussianBlur(src_gray, temp, cv::Size(21,21),0,0);
+	if(gaussian_value % 2 != 1) gaussian_value += 1;
+	cv::GaussianBlur(src_gray, temp, cv::Size(gaussian_value, gaussian_value),0,0);
 	cv::threshold( temp, dst, threshold_value, max_BINARY_value, threshold_type );
  
 	segmented_image = watershedSegmentation(dst);
@@ -782,19 +778,21 @@ int main(int argc, char **argv)
 		}
 		inputImageFile.close();
 
-		gdcm::ImageReader reader;
+		/*gdcm::ImageReader reader;
 		inputFilePath = inputFilePath + "test_data_hw3_1";
 		reader.SetFileName((inputFilePath + inputDicomName).c_str());
 		if( !reader.Read() )
 		{
 			std::cerr << "Could not read: " << inputFilePath + inputDicomName << std::endl;
 			return 1;
-		}
+		}*/
 		//std::cout << reader.GetImage() << "\n";
 
+		/* Tried to read a dcm file but could not succeed */
+
 		// The other output of gdcm::ImageReader is a gdcm::Image
-		const gdcm::Image &image2 = reader.GetImage();
-		image2.Print(std::cout);
+		//const gdcm::Image &image2 = reader.GetImage();
+		//image2.Print(std::cout);
 		// Let's get some property from the image:
 		//unsigned int ndim = image.GetNumberOfDimensions();
 		//std::cout << "ndim: " << ndim << "\n";
